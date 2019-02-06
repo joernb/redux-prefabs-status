@@ -6,7 +6,9 @@ script:
 - npm run test
 deploy:
   provider: npm
+  skip_cleanup: true
   on:
+    branch: master
     tags: true
     repo: joernb/redux-prefabs-status
   email:
