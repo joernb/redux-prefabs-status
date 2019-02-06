@@ -1,7 +1,7 @@
 {
   "name": "redux-prefabs-status",
   "private": false,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Redux-based prefabs for indicating and tracking if the application is busy",
   "keywords": [
     "prefabs",
