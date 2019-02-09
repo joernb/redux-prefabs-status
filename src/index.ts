@@ -1,41 +1,56 @@
 import { FSA } from "flux-standard-action";
 import { Middleware, Reducer } from "redux";
 
-interface BusyStatusChangedAction extends FSA<boolean> {
-  type: "BusyStatusChanged";
+interface BusyStatus {
+  statusId: string;
+  isBusy: boolean;
 }
 
+interface BusyStatusChangedAction extends FSA<BusyStatus> {
+  type: "BusyStatusChanged";
+  payload: BusyStatus;
+}
+
+// TODO maybe implement this as a nesting prefab
 export const busyStatus = <
   BeginAction extends FSA<any> = FSA<void>,
   EndAction extends FSA<any> = FSA<void>
-> (
+>(
   {
     beginType,
-    endType
+    endType,
+    statusId = ""
   }: {
     beginType: BeginAction["type"];
     endType: EndAction["type"];
+    statusId?: string;
   }
 ): Middleware =>
   api => next => {
-    let counter = 0;
     return (action: BusyStatusChangedAction) => {
-      const result = next(action);
-
-      if (action.type === beginType) {
+      if (action.type === beginType && !action.error) {
         api.dispatch({
           type: "BusyStatusChanged",
-          payload: true
+          payload: {
+            statusId,
+            isBusy: true
+          }
         } as BusyStatusChangedAction);
+        return next(action);
       }
       if (action.type === endType) {
+        const result = next(action);
         api.dispatch({
           type: "BusyStatusChanged",
-          payload: false
+          payload: {
+            statusId,
+            isBusy: false
+          }
         } as BusyStatusChangedAction);
+        return result;
+      } else {
+        return next(action);
       }
-
-      return result;
     };
   };
 
@@ -47,53 +62,68 @@ export const trackStatus = <
     busyType,
     mapBusy = () => undefined,
     readyType,
-    mapReady = () => undefined
+    mapReady = () => undefined,
+    statusId = ""
   }: {
     busyType?: BusyAction["type"];
     mapBusy?: () => BusyAction["payload"];
     readyType?: ReadyAction["type"];
     mapReady?: () => ReadyAction["payload"];
+    statusId?: string;
   }
 ): Middleware =>
   api => next => {
-    let counter = 0;
-    let statusNeverChanged = true;
 
-    // automatically emit ready action if no status changes were received during initialization
-    setTimeout(() => {
-      if (counter === 0 && statusNeverChanged) {
-        api.dispatch({
-          type: readyType,
-          payload: mapReady()
-        });
-      }
-    }, 0);
+    let timeoutHandle: number | null = null;
+
+    // slightly delayed action dispatch, can be canceled
+    const scheduleReadyDispatch = () => {
+      console.log("scheduleReadyDispatch in a few seconds");
+      timeoutHandle = setTimeout(
+        () => {
+          try {
+            console.log("scheduleReadyDispatch now");
+            api.dispatch({
+              type: readyType,
+              payload: mapReady()
+            });
+          } catch (error) {
+            api.dispatch({
+              type: readyType,
+              payload: error,
+              error: true
+            })
+          }
+        },
+        0
+      );
+    }
+
+    let counter = 0;
+
+    // initially schedule a ready dispatch in case no busy status changes are triggered at all
+    scheduleReadyDispatch();
 
     return (action: BusyStatusChangedAction) => {
       const result = next(action);
 
-      if (action.type === "BusyStatusChanged") {
+      if (action.type === "BusyStatusChanged" && action.payload.statusId === statusId) {
+        // every status change cancels a scheduled dispatch
+        if (timeoutHandle !== null) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+
         // update counter
-        counter = counter + (action.payload === true ? 1 : -1);
-        // set changed flag
-        statusNeverChanged = false;
-        // trigger hook when counter reaches 0
-        if (counter === 0) {
+        counter = counter + (action.payload.isBusy === true ? 1 : -1);
+
+        if (counter === 0 && action.payload.isBusy === false) {
+          // now ready
           if (readyType) {
-            try {
-              api.dispatch({
-                type: readyType,
-                payload: mapReady()
-              });
-            } catch (error) {
-              api.dispatch({
-                type: readyType,
-                payload: error,
-                error: true
-              })
-            }
+            scheduleReadyDispatch();
           }
-        } else {
+        } else if (counter === 1 && action.payload.isBusy === true) {
+          // now busy
           if (busyType) {
             try {
               api.dispatch({
@@ -117,10 +147,16 @@ export const trackStatus = <
 
 export type BusyStatusCounterState = number;
 
-export const busyStatusCounter = (): Reducer<BusyStatusCounterState> =>
+export const busyStatusCounter = (
+  {
+    statusId = ""
+  }: {
+    statusId?: string;
+  }
+): Reducer<BusyStatusCounterState> =>
   (state: BusyStatusCounterState = 0, action: BusyStatusChangedAction) => {
-    if (action.type === "BusyStatusChanged") {
-      return state + (action.payload === true ? 1 : -1);
+    if (action.type === "BusyStatusChanged" && action.payload.statusId === statusId) {
+      return state + (action.payload.isBusy === true ? 1 : -1);
     }
     return state;
   };
