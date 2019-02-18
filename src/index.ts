@@ -78,11 +78,9 @@ export const trackStatus = <
 
     // slightly delayed action dispatch, can be canceled
     const scheduleReadyDispatch = () => {
-      console.log("scheduleReadyDispatch in a few seconds");
       timeoutHandle = setTimeout(
         () => {
           try {
-            console.log("scheduleReadyDispatch now");
             api.dispatch({
               type: readyType,
               payload: mapReady()
